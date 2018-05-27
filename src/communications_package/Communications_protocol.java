@@ -20,6 +20,7 @@ public class Communications_protocol {
 	private static final byte START_OF_PACKET = (byte) 0x73;
 	private static final byte END_OF_PACKET = (byte) 0xD9;
 	
+	private static final byte COMMAND_KEEP_ALIVE = (byte) 0x10;
 	// rx states 
 	private static final byte rx_state_look_for_start_of_packet_byte = 0;
 	private static final byte rx_state_look_for_additional_byte_count_byte = 1;
@@ -29,8 +30,15 @@ public class Communications_protocol {
 	private static final byte rx_state_check_command_byte = 5;
 	//
 	private static byte rx_state; 
-	
+	//
+	// tx variables
+	private static final int TX_PACKET_FIFO_SIZE = 20;
+	private static final int KEEP_ALIVE_TIMEOUT_MS = 10000;
+	private static Fifo<Byte[]> tx_packet_fifo = null;
+	//
 	private IHardwareDriver com_port;
+	//
+	private Object tx_wait_object;
 
 	// name: 	Communications_protocol
 	// desc: 	Communications_protocol private constructor
@@ -61,43 +69,89 @@ public class Communications_protocol {
 	// desc: 	opens a connection 
 	public void open_connection(String connection)
 	{
-		byte test_data[] = new byte[7];
-		//
 		com_port.OpenConnection(connection);
 		//
-		test_data[0] = START_OF_PACKET;
-		test_data[1] = (byte) 0x00;
-		test_data[2] = (byte) 0x90;
-		test_data[3] = (byte) 0x01;
-		test_data[4] = (byte) 0xA3;
-		test_data[5] = (byte) 0x55;
-		test_data[6] = END_OF_PACKET;
-		//
-		com_port.addToTxQueue(test_data, 7);
-		//
 		initialise_comms();
+		//
+		sendKeepAlivePacket();
 	}
 	
-
-	public void onTxdataSent() {
-		// TODO Auto-generated method stub
-		
-	}
-
-	public void onRxDataReceived() {
-		// TODO Auto-generated method stub
-		
+	// name: 	sendKeepAlivePacket
+	// desc: 	creates a keep alive packet and adds it to the tx fifo 
+	public void sendKeepAlivePacket()
+	{
+		Byte keep_alive_data[] = new Byte[7];
+		char checksum;
+		//
+		keep_alive_data[START_OF_PACKET_BYTE] = START_OF_PACKET;
+		keep_alive_data[BYTE_COUNT_BYTE] = (byte) 0;
+		keep_alive_data[COMMAND_BYTE] = COMMAND_KEEP_ALIVE | COMMAND_IS_REQUEST_NOT_RESPONSE;
+		keep_alive_data[STATUS_BYTE] = (byte) 0;
+		//
+		checksum = CRC16.calculateCRC(keep_alive_data, DEFAULT_BYTES_INCLUDED_IN_CRC);
+		//
+		keep_alive_data[DEFAULT_CRC_LSB_BYTE] = (byte) (checksum & 0x00FF);
+		keep_alive_data[DEFAULT_CRC_MSB_BYTE] = (byte) ((checksum & 0xFF00) >> 8);
+		keep_alive_data[DEFAULT_END_OF_PACKET_BYTE] = END_OF_PACKET;
+		//
+		add_to_tx_fifo(keep_alive_data);
 	}
 	
+	// name: 	add_to_tx_fifo
+	// desc: 	adds a packet to the tx fifo 
+	private void add_to_tx_fifo(Byte[] packet)
+	{
+		tx_packet_fifo.Add(packet);
+		//
+		synchronized(tx_wait_object){
+			tx_wait_object.notify();
+		}
+	}
+	
+	// name: 	initialise_coms
+	// desc: 	sets the tx and rx threads running
 	private void initialise_comms()
 	{
+		tx_wait_object = new Object();
+		
+		tx_packet_fifo = new Fifo<Byte[]>(TX_PACKET_FIFO_SIZE);
+		//
 		rx_state = rx_state_look_for_start_of_packet_byte;
 		//
 		Thread tx_thread = new Thread() {
 			public void run(){
 				//
+				Byte[] packet_to_tx;
+				//
 				while(true) {
-					
+					// if there is a packet in the fifo then send it 
+					if(!tx_packet_fifo.IsEmpty())
+					{
+						// if there are packets in the fifo then send it 
+						packet_to_tx = tx_packet_fifo.Remove();
+						//
+						com_port.addToTxQueue(packet_to_tx, packet_to_tx.length);
+					}
+					//
+					// if the fifo is now empty wait for keepalive timeout unless we are notified
+					if(tx_packet_fifo.IsEmpty())
+					{
+						try {
+							synchronized(tx_wait_object) {
+								tx_wait_object.wait(KEEP_ALIVE_TIMEOUT_MS);
+							}
+						} catch (InterruptedException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
+						//
+						// if the packet fifo is still empty then add a keep alive 
+						if(tx_packet_fifo.IsEmpty())
+						{
+							// if the tx fifo is still empty then send a keep alive 
+							sendKeepAlivePacket();
+						}
+					}
 				}
 			}
 		};
@@ -107,7 +161,7 @@ public class Communications_protocol {
 		Thread rx_thread = new Thread() {
 			public void run() {
 				//
-				byte[] received_packet = new byte[MAX_PACKET_BYTES];
+				Byte[] received_packet = new Byte[MAX_PACKET_BYTES];
 				byte byte_count_received = 0;
 				byte received_byte;
 				byte bytes_received = 0;
@@ -195,7 +249,7 @@ public class Communications_protocol {
 							//
 							calculated_checksum = CRC16.calculateCRC(received_packet, (DEFAULT_BYTES_INCLUDED_IN_CRC + byte_count_received));
 							//
-							received_checksum = (char)(((char)(received_packet[DEFAULT_CRC_MSB_BYTE + byte_count_received]) << 8) + received_packet[DEFAULT_CRC_LSB_BYTE + byte_count_received]);
+							received_checksum = (char)(((char)((byte)(received_packet[DEFAULT_CRC_MSB_BYTE + byte_count_received])) << 8) + received_packet[DEFAULT_CRC_LSB_BYTE + byte_count_received]);
 							//
 							if(calculated_checksum == received_checksum){
 								// crc matches so check command
@@ -224,12 +278,16 @@ public class Communications_protocol {
 		rx_thread.start();
 	}
 	
+	// name: 	process_received_request
+	// desc: 	processes a received request packet
 	private void process_received_request(byte command)
 	{
 		// remove request bit
 		command &= ~(COMMAND_IS_REQUEST_NOT_RESPONSE);
 	}
 	
+	// name: 	process_received_response
+	// desc: 	processes a received response packet
 	private void process_received_response(byte command)
 	{
 		

@@ -1,5 +1,7 @@
 package communications_package;
 
+import java.util.Date;
+
 import com.fazecast.jSerialComm.SerialPort;
 
 class SerialPortDriver implements IHardwareDriver {
@@ -16,11 +18,13 @@ class SerialPortDriver implements IHardwareDriver {
 	private Object tx_fifo_lock = new Object();
 	private Fifo<Byte> rx_fifo = null;
 	private Object rx_fifo_lock = new Object();
-		
+	
+	private boolean port_initialised;
+			
 	// name: 	SerialPortDriver
 	// desc: 	SerialPortDriver constructor
 	public SerialPortDriver() {
-		
+		port_initialised = false;
 	}
 	
 	// name: 	GetAvailablePorts
@@ -118,22 +122,33 @@ class SerialPortDriver implements IHardwareDriver {
 				};
 				//
 				rx_thread.start();
+				//
+				port_initialised = true;
 			}
 		}
 		//
 	}
 	
-	public void addToTxQueue(byte[] tx_data, int length){
+	// name: 	addToTxQueue
+	// desc: 	adds data to the tx fifo
+	public void addToTxQueue(Byte[] tx_data, int length){
 		//synchronize access to the tx fifo
 		synchronized(tx_fifo_lock) {
-			// add all the bytes to the tx fifo
-			for(int i = 0; i < length; i++)
-			{
-				tx_fifo.Add(tx_data[i]);
+			//
+			if(port_initialised) {
+				// add all the bytes to the tx fifo
+				for(int i = 0; i < length; i++)
+				{
+					tx_fifo.Add(tx_data[i]);
+				}
+				//
+				System.out.println(new Date().toString());
 			}
 		}
 	}
 	
+	// name: 	removeFromRxQueue
+	// desc: 	removes data from the rx fifo
 	public byte removeFromRxQueue(){
 		byte rx_byte;
 		// synchronize access to the rx fifo
@@ -142,12 +157,23 @@ class SerialPortDriver implements IHardwareDriver {
 		}
 		return rx_byte;
 	}
-
+	
+	// name: 	isConnectionOpen
+	// desc: 	returns true if the connection is open else returns false
 	public boolean isConnectionOpen() {
 		return serial_port.isOpen();
 	}
-
+	
+	// name: 	dataInRxQueue
+	// desc: 	returns true if the fifo is not empty else returns false
 	public boolean dataInRxQueue() {
-		return !rx_fifo.IsEmpty();
+		boolean data_in_queue = false;
+		
+		if(port_initialised)
+		{
+			data_in_queue = !rx_fifo.IsEmpty();
+		}
+		
+		return data_in_queue;
 	}
 }

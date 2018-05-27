@@ -38,13 +38,21 @@ public class CRC16 {
 			0xEF1F, 0xFF3E, 0xCF5D, 0xDF7C, 0xAF9B, 0xBFBA, 0x8FD9, 0x9FF8,
 			0x6E17, 0x7E36, 0x4E55, 0x5E74, 0x2E93, 0x3EB2, 0x0ED1, 0x1EF0
 		};
-	
-	public static char calculateCRC(byte[] data, int length) {
+
+	// name: 	calculateCRC
+	// desc: 	calculates and returns the crc of the data passed
+	public static char calculateCRC(Byte[] data, int length) {
 		char calculated_crc = INITIAL_CRC_VALUE;
-		
+				
 		for(int i = 0; i < length; i++)
 		{
-			calculated_crc = (char) ((calculated_crc << 8) ^ (CRC_TABLE[(calculated_crc >> 8) ^ (data[i])]));
+			//System.out.print(i);
+			//System.out.print(data[i]);
+			//System.out.print((calculated_crc >> 8));
+			//System.out.print(((char)((calculated_crc >> 8) & 0xFF) ^ (char)((data[i]) & 0xFF)));
+			//System.out.print("\n\r");
+			//
+			calculated_crc = (char) ((calculated_crc << 8) ^ (CRC_TABLE[((char)((calculated_crc >> 8) & 0xFF) ^ (char)((data[i]) & 0xFF))]));
 		}
 		
 		return calculated_crc;

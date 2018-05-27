@@ -7,7 +7,7 @@ public interface IHardwareDriver {
 	void OpenConnection(String connection);
 	boolean isConnectionOpen();
 	
-	void addToTxQueue(byte[] tx_data, int length);
+	void addToTxQueue(Byte[] tx_data, int length);
 	boolean dataInRxQueue();
 	byte removeFromRxQueue();
 }
